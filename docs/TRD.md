@@ -37,6 +37,7 @@
   - price_krw: INTEGER
   - status: TEXT ("issued" | "canceled")
   - memo: TEXT | NULL
+  - date time은 entity에 넣지마.
 
 ## 5. API 설계
 ### 5.1 발권 API

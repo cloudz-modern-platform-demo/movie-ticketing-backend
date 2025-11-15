@@ -1,2 +1,1 @@
-# Entity module
-
+# Entity layer

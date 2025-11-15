@@ -149,8 +149,6 @@ curl -X GET "http://localhost:9000/tickets/abc123"
   "price_krw": 15000,
   "status": "issued",
   "memo": "VIP석",
-  "created_at": "2025-11-15T10:00:00",
-  "updated_at": "2025-11-15T10:00:00"
 }
 ```
 
@@ -175,8 +173,6 @@ curl -X GET "http://localhost:9000/tickets?theater_name=CGV%20강남&status=issu
       "price_krw": 15000,
       "status": "issued",
       "memo": "VIP석",
-      "created_at": "2025-11-15T10:00:00",
-      "updated_at": "2025-11-15T10:00:00"
     }
   ],
   "total": 1,
@@ -202,8 +198,6 @@ curl -X GET "http://localhost:9000/tickets?theater_name=CGV%20강남&status=issu
 | price_krw | INTEGER | 가격 (KRW, 1~1,000,000) |
 | status | TEXT | 상태 (issued \| canceled) |
 | memo | TEXT | 메모 (선택) |
-| created_at | DATETIME | 생성 시간 |
-| updated_at | DATETIME | 수정 시간 |
 
 ## 멱등성 (Idempotency)
 

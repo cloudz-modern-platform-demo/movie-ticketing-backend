@@ -1,197 +1,163 @@
-"""
-티켓 라우트
-REST API 엔드포인트 구현
-"""
-from typing import Optional, Annotated
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+"""티켓 REST API 라우트"""
+from typing import Optional
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.orm import Session
+
 from movie_ticketing_backend.db.session import get_db
-from movie_ticketing_backend.scheme.ticket import (
-    IssueTicketRequest,
-    IssueTicketResponse,
-    RefundTicketRequest,
-    RefundTicketResponse,
-    TicketResponse,
-    TicketListResponse
-)
 from movie_ticketing_backend.service.ticket_service import TicketService
+from movie_ticketing_backend.scheme.ticket import (
+    TicketIssueRequest,
+    TicketIssueResponse,
+    TicketRefundRequest,
+    TicketRefundResponse,
+    TicketResponse,
+    TicketListResponse,
+)
 from movie_ticketing_backend.util.idempotency import get_idempotency_cache
 
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
 
-def get_ticket_service(db: Session = Depends(get_db)) -> TicketService:
-    """
-    티켓 서비스 의존성 주입
-    
-    Args:
-        db: 데이터베이스 세션
-        
-    Returns:
-        TicketService 인스턴스
-    """
-    return TicketService(db, get_idempotency_cache())
-
-
-@router.post(
-    "/issue",
-    response_model=IssueTicketResponse,
-    status_code=201,
-    summary="티켓 발권",
-    description="티켓을 발권합니다. 수량만큼 티켓을 생성합니다."
-)
-async def issue_tickets(
-    request: IssueTicketRequest,
-    service: Annotated[TicketService, Depends(get_ticket_service)],
-    idempotency_key: Annotated[Optional[str], Header()] = None
+@router.post("/issue", response_model=TicketIssueResponse, status_code=status.HTTP_201_CREATED)
+def issue_tickets(
+    request: TicketIssueRequest,
+    db: Session = Depends(get_db),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
 ):
     """
-    티켓 발권 엔드포인트
+    티켓 발권
     
-    Args:
-        request: 발권 요청 데이터
-        service: 티켓 서비스
-        idempotency_key: 멱등성 키 (선택)
-        
-    Returns:
-        발권 응답 데이터
-        
-    Raises:
-        HTTPException: 400 (유효성 오류), 409 (멱등성 충돌), 500 (서버 오류)
+    - **theater_name**: 극장명 (1~100자)
+    - **user_id**: 사용자 ID (1~100자)
+    - **movie_title**: 영화명 (1~200자)
+    - **price_krw**: 가격 (1~1,000,000 KRW)
+    - **quantity**: 수량 (1~10, 기본값: 1)
+    - **memo**: 메모 (선택)
+    
+    멱등성 지원을 위해 `Idempotency-Key` 헤더를 사용할 수 있습니다.
     """
+    service = TicketService(db)
+    
+    # 멱등성 키가 있으면 캐시 확인
+    if idempotency_key:
+        cache = get_idempotency_cache()
+        request_data = request.model_dump()
+        cached = cache.get(idempotency_key, request_data)
+        
+        if cached is not None:
+            is_same, cached_response = cached
+            if is_same:
+                # 동일한 요청이면 캐시된 응답 반환
+                return cached_response
+            else:
+                # 다른 요청이면 충돌
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="멱등성 키 충돌: 동일한 키로 다른 요청이 이미 처리되었습니다",
+                )
+    
+    # 티켓 발권
     try:
-        response, status_code = service.issue_tickets(request, idempotency_key)
-        # 멱등성 키가 있고 동일 요청인 경우 200 반환
-        # 새 요청인 경우 201 반환
-        if status_code == 200:
-            return response
+        response = service.issue_tickets(request)
+        
+        # 멱등성 키가 있으면 캐시에 저장
+        if idempotency_key:
+            cache = get_idempotency_cache()
+            cache.set(idempotency_key, request.model_dump(), response)
+        
         return response
-    except ValueError as e:
-        # 멱등성 충돌
-        if "Idempotency key conflict" in str(e):
-            raise HTTPException(status_code=409, detail=str(e))
-        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"티켓 발권 실패: {str(e)}",
+        )
 
 
-@router.post(
-    "/refund",
-    response_model=RefundTicketResponse,
-    status_code=200,
-    summary="티켓 환불",
-    description="티켓을 환불합니다. 여러 티켓을 한 번에 환불할 수 있습니다."
-)
-async def refund_tickets(
-    request: RefundTicketRequest,
-    service: Annotated[TicketService, Depends(get_ticket_service)]
+@router.post("/refund", response_model=TicketRefundResponse, status_code=status.HTTP_200_OK)
+def refund_tickets(
+    request: TicketRefundRequest,
+    db: Session = Depends(get_db),
 ):
     """
-    티켓 환불 엔드포인트
+    티켓 환불
     
-    Args:
-        request: 환불 요청 데이터
-        service: 티켓 서비스
-        
-    Returns:
-        환불 응답 데이터
-        
-    Raises:
-        HTTPException: 400 (유효성 오류), 500 (서버 오류)
+    - **ticket_ids**: 환불할 티켓 ID 목록
+    - **reason**: 환불 사유 (선택)
+    
+    응답:
+    - **refunded**: 성공적으로 환불된 티켓 ID 목록
+    - **already_canceled**: 이미 취소된 티켓 ID 목록
+    - **not_found**: 존재하지 않는 티켓 ID 목록
     """
+    service = TicketService(db)
+    
     try:
         return service.refund_tickets(request)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"티켓 환불 실패: {str(e)}",
+        )
 
 
-@router.get(
-    "/{ticket_id}",
-    response_model=TicketResponse,
-    status_code=200,
-    summary="티켓 단일 조회",
-    description="티켓 ID로 특정 티켓을 조회합니다."
-)
-async def get_ticket(
+@router.get("/{ticket_id}", response_model=TicketResponse, status_code=status.HTTP_200_OK)
+def get_ticket(
     ticket_id: str,
-    service: Annotated[TicketService, Depends(get_ticket_service)]
+    db: Session = Depends(get_db),
 ):
     """
-    티켓 단일 조회 엔드포인트
+    티켓 단일 조회
     
-    Args:
-        ticket_id: 티켓 ID
-        service: 티켓 서비스
-        
-    Returns:
-        티켓 응답 데이터
-        
-    Raises:
-        HTTPException: 404 (티켓 없음), 500 (서버 오류)
+    - **ticket_id**: 티켓 ID
     """
-    try:
-        ticket = service.get_ticket(ticket_id)
-        if not ticket:
-            raise HTTPException(status_code=404, detail=f"Ticket not found: {ticket_id}")
-        return ticket
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    service = TicketService(db)
+    
+    ticket = service.get_ticket(ticket_id)
+    if ticket is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"티켓을 찾을 수 없습니다: {ticket_id}",
+        )
+    
+    return ticket
 
 
-@router.get(
-    "",
-    response_model=TicketListResponse,
-    status_code=200,
-    summary="티켓 목록 조회",
-    description="필터 조건과 페이징을 사용하여 티켓 목록을 조회합니다."
-)
-async def list_tickets(
-    service: Annotated[TicketService, Depends(get_ticket_service)],
-    theater_name: Annotated[Optional[str], Query(description="극장명 필터")] = None,
-    user_id: Annotated[Optional[str], Query(description="사용자 ID 필터")] = None,
-    movie_title: Annotated[Optional[str], Query(description="영화명 필터")] = None,
-    status: Annotated[Optional[str], Query(description="상태 필터 (issued | canceled)")] = None,
-    limit: Annotated[int, Query(ge=1, le=1000, description="최대 조회 개수")] = 100,
-    offset: Annotated[int, Query(ge=0, description="페이징 오프셋")] = 0
+@router.get("", response_model=TicketListResponse, status_code=status.HTTP_200_OK)
+def get_ticket_list(
+    theater_name: Optional[str] = Query(None, description="극장명 필터"),
+    user_id: Optional[str] = Query(None, description="사용자 ID 필터"),
+    movie_title: Optional[str] = Query(None, description="영화명 필터"),
+    status_filter: Optional[str] = Query(None, alias="status", description="상태 필터 (issued | canceled)"),
+    limit: int = Query(100, ge=1, le=1000, description="페이지 크기 (최대 1000)"),
+    offset: int = Query(0, ge=0, description="페이지 오프셋"),
+    db: Session = Depends(get_db),
 ):
     """
-    티켓 목록 조회 엔드포인트
+    티켓 목록 조회
     
-    Args:
-        service: 티켓 서비스
-        theater_name: 극장명 필터 (선택)
-        user_id: 사용자 ID 필터 (선택)
-        movie_title: 영화명 필터 (선택)
-        status: 상태 필터 (선택)
-        limit: 최대 조회 개수
-        offset: 페이징 오프셋
-        
-    Returns:
-        티켓 목록 응답 데이터
-        
-    Raises:
-        HTTPException: 400 (유효성 오류), 500 (서버 오류)
+    필터링 및 페이징을 지원합니다.
+    
+    - **theater_name**: 극장명 필터 (선택)
+    - **user_id**: 사용자 ID 필터 (선택)
+    - **movie_title**: 영화명 필터 (선택)
+    - **status**: 상태 필터 (issued | canceled, 선택)
+    - **limit**: 페이지 크기 (1~1000, 기본값: 100)
+    - **offset**: 페이지 오프셋 (기본값: 0)
     """
+    service = TicketService(db)
+    
     try:
-        # 상태 필터 검증
-        if status and status not in ["issued", "canceled"]:
-            raise ValueError(f"Invalid status: {status}. Must be 'issued' or 'canceled'")
-
-        return service.list_tickets(
+        return service.get_ticket_list(
             theater_name=theater_name,
             user_id=user_id,
             movie_title=movie_title,
-            status=status,
+            status=status_filter,
             limit=limit,
-            offset=offset
+            offset=offset,
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"티켓 목록 조회 실패: {str(e)}",
+        )
