@@ -1,2 +1,2 @@
-"""Database package."""
+# Database module
 

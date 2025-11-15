@@ -1,2 +1,2 @@
-"""Entity package for ORM models."""
+# Entity module
 

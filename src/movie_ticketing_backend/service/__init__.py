@@ -1,2 +1,2 @@
-"""Service package for business logic."""
+# Service module
 

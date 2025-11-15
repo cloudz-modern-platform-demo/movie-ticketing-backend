@@ -36,8 +36,6 @@
   - movie_title: TEXT
   - price_krw: INTEGER
   - status: TEXT ("issued" | "canceled")
-  - issued_at: DATETIME(UTC)
-  - canceled_at: DATETIME(UTC) | NULL
   - memo: TEXT | NULL
 
 ## 5. API 설계
@@ -98,8 +96,6 @@
        - movie_title: string
        - price_krw: int
        - status: string ("issued" | "canceled")
-       - issued_at: string (ISO 8601)
-       - canceled_at: string | null (ISO 8601)
        - memo: string | null
    - Errors:
      - 404: 티켓이 존재하지 않음

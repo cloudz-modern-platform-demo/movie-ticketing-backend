@@ -1,41 +1,40 @@
-"""Ticket ORM entity definition."""
-
-from datetime import datetime
+"""
+Ticket ORM 엔티티
+SQLAlchemy ORM 모델 정의
+"""
+import uuid
 from sqlalchemy import Column, String, Integer, DateTime
+from sqlalchemy.sql import func
 from movie_ticketing_backend.db.session import Base
 
 
 class Ticket(Base):
     """
-    Ticket ORM entity representing a movie ticket.
-    
-    Attributes:
-        id: Unique ticket identifier (UUID)
-        theater_name: Name of the theater
-        user_id: User identifier who purchased the ticket
-        movie_title: Title of the movie
-        price_krw: Price in Korean Won (integer)
-        status: Ticket status ('issued' or 'canceled')
-        issued_at: Timestamp when the ticket was issued
-        canceled_at: Timestamp when the ticket was canceled (nullable)
-        memo: Optional memo or notes
+    티켓 테이블 ORM 모델
     """
-    
     __tablename__ = "tickets"
+
+    # 기본 키 - UUID 문자열
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     
-    id = Column(String, primary_key=True, index=True)
-    theater_name = Column(String, nullable=False, index=True)
-    user_id = Column(String, nullable=False, index=True)
-    movie_title = Column(String, nullable=False, index=True)
+    # 티켓 정보
+    theater_name = Column(String(100), nullable=False)
+    user_id = Column(String(100), nullable=False)
+    movie_title = Column(String(200), nullable=False)
     price_krw = Column(Integer, nullable=False)
-    status = Column(String, nullable=False, index=True)  # 'issued' or 'canceled'
-    issued_at = Column(DateTime, nullable=False)
-    canceled_at = Column(DateTime, nullable=True)
+    
+    # 상태: "issued" | "canceled"
+    status = Column(String(20), nullable=False, default="issued")
+    
+    # 메모 (선택)
     memo = Column(String, nullable=True)
     
-    def __repr__(self) -> str:
-        return (
-            f"<Ticket(id={self.id}, theater={self.theater_name}, "
-            f"movie={self.movie_title}, status={self.status})>"
-        )
+    # 생성 시간
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    # 업데이트 시간
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    def __repr__(self):
+        return f"<Ticket(id={self.id}, theater={self.theater_name}, movie={self.movie_title}, status={self.status})>"
 
